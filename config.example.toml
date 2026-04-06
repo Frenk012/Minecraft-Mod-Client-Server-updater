@@ -1,0 +1,18 @@
+[local]
+# Absolute path to your local Minecraft mods folder
+mods_folder = "C:/Users/YourName/AppData/Roaming/.minecraft/mods"
+# Minecraft version to match against (e.g. "1.21.1")
+minecraft_version = "1.21.1"
+# Mod loader: "fabric", "forge", or "neoforge"
+loader = "fabric"
+
+[sftp]
+# SFTP server hostname or IP
+host = "play.example.com"
+port = 22
+username = "mcadmin"
+# Use either password OR key_path (not both)
+password = "your-password-here"
+key_path = ""
+# Absolute path to the mods folder on the remote server
+remote_mods_folder = "/home/mcadmin/server/mods"
