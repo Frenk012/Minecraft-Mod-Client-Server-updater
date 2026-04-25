@@ -18,8 +18,7 @@ def scan_remote_mods(sftp: SFTPClient, remote_folder: str) -> list:
         for name in jar_names:
             remote_path = remote_folder.rstrip("/") + "/" + name
             try:
-                data = sftp.read_remote_file_bytes(remote_path)
-                sha = lm.hash_bytes(data)
+                sha = sftp.get_remote_file_hash(remote_path)
                 result.append(LocalMod(filename=name, filepath=remote_path, sha512=sha))
             except Exception as e:
                 progress.print(f"[yellow]Warning:[/yellow] Could not read remote file '{name}': {e}")
