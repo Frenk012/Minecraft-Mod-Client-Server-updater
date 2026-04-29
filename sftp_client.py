@@ -1,6 +1,5 @@
 import paramiko
 from models import AppConfig
-import local_mods
 
 
 class SFTPClient:
@@ -42,20 +41,6 @@ class SFTPClient:
     def read_remote_file_bytes(self, remote_path: str) -> bytes:
         with self._sftp.open(remote_path, "rb") as f:
             return f.read()
-
-    def get_remote_file_hash(self, remote_path: str) -> str:
-        """Calculate SHA512 hash of remote file server-side using sha512sum command."""
-        try:
-            stdin, stdout, stderr = self._ssh.exec_command(f"sha512sum '{remote_path}'")
-            output = stdout.read().decode().strip()
-            if output:
-                # sha512sum output format: "hash  filename"
-                return output.split()[0]
-        except Exception:
-            pass
-        # Fallback: download and hash locally if server-side command fails
-        data = self.read_remote_file_bytes(remote_path)
-        return local_mods.hash_bytes(data)
 
     def upload_file(self, local_path: str, remote_path: str, progress_callback=None):
         self._sftp.put(local_path, remote_path, callback=progress_callback)
