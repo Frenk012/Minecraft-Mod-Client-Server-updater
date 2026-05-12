@@ -19,7 +19,7 @@ console = Console()
 def main() -> None:
     console.print(Panel.fit(
         "[bold cyan]Minecraft Mod Updater[/bold cyan]\n"
-        "[dim]Powered by Modrinth API[/dim]",
+        "[dim]Powered by CurseForge + Modrinth[/dim]",
         border_style="cyan",
     ))
 
@@ -43,11 +43,12 @@ def main() -> None:
         mod_infos, unknown_mods = [], []
     else:
         with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
-            task = progress.add_task("Querying Modrinth API...", total=None)
+            task = progress.add_task("Querying mod APIs...", total=None)
             mod_infos, unknown_mods = updater.identify_and_check_updates(
                 local_mod_list,
                 config.minecraft_version,
                 config.loader,
+                curseforge_api_key=config.curseforge_api_key,
                 progress=progress,
             )
 
@@ -91,6 +92,7 @@ def main() -> None:
                     remote_local_mods,
                     config.minecraft_version,
                     config.loader,
+                    curseforge_api_key=config.curseforge_api_key,
                     progress=progress,
                 )
 
@@ -102,6 +104,7 @@ def main() -> None:
                     fresh_local,
                     config.minecraft_version,
                     config.loader,
+                    curseforge_api_key=config.curseforge_api_key,
                     progress=progress,
                 )
 

@@ -6,6 +6,11 @@ minecraft_version = "1.21.1"
 # Mod loader: "fabric", "forge", or "neoforge"
 loader = "fabric"
 
+[curseforge]
+# Optional. Get a free API key at https://console.curseforge.com
+# If set, CurseForge is preferred over Modrinth when both have the mod.
+api_key = ""
+
 [sftp]
 # SFTP server hostname or IP
 host = "play.example.com"

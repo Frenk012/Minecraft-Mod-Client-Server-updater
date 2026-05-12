@@ -3,6 +3,8 @@ import tomllib
 from models import AppConfig
 
 
+
+
 def load_config(path: str = "config.toml") -> AppConfig:
     try:
         with open(path, "rb") as f:
@@ -28,6 +30,9 @@ def load_config(path: str = "config.toml") -> AppConfig:
         password = sftp.get("password") or None
         key_path = sftp.get("key_path") or None
         remote_mods_folder = sftp["remote_mods_folder"]
+
+        cf_section = data.get("curseforge", {})
+        curseforge_api_key = cf_section.get("api_key") or None
     except KeyError as e:
         print(f"Config error: missing required key {e} in '{path}'.")
         sys.exit(1)
@@ -46,4 +51,5 @@ def load_config(path: str = "config.toml") -> AppConfig:
         sftp_password=password,
         sftp_key_path=key_path,
         remote_mods_folder=remote_mods_folder,
+        curseforge_api_key=curseforge_api_key,
     )

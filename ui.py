@@ -8,14 +8,22 @@ from models import ModInfo, UnknownMod, DiscrepancyRecord
 console = Console()
 
 
+_SOURCE_LABEL = {
+    "curseforge": "[orange3]CurseForge[/orange3]",
+    "modrinth": "[green]Modrinth[/green]",
+}
+
+
 def show_update_table(mod_infos: list, unknown_mods: list) -> None:
     table = Table(title="Installed Mods", show_lines=True)
     table.add_column("Mod Name", style="bold")
+    table.add_column("Source")
     table.add_column("Current Version")
     table.add_column("Latest Version")
     table.add_column("Status")
 
     for mod in mod_infos:
+        source_label = _SOURCE_LABEL.get(mod.current_version.source, mod.current_version.source)
         current = mod.current_version.version_number
         if mod.latest_version:
             latest = mod.latest_version.version_number
@@ -23,14 +31,15 @@ def show_update_table(mod_infos: list, unknown_mods: list) -> None:
         else:
             latest = "[dim]—[/dim]"
             status = "[green]Up to date[/green]"
-        table.add_row(mod.project_name, current, latest, status)
+        table.add_row(mod.project_name, source_label, current, latest, status)
 
     for u in unknown_mods:
         table.add_row(
             u.local_mod.filename,
+            "[dim]—[/dim]",
             "[dim]unknown[/dim]",
             "[dim]—[/dim]",
-            "[dim]Not on Modrinth[/dim]",
+            "[dim]Not identified[/dim]",
         )
 
     console.print(table)

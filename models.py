@@ -13,6 +13,7 @@ class AppConfig:
     sftp_password: Optional[str]
     sftp_key_path: Optional[str]
     remote_mods_folder: str
+    curseforge_api_key: Optional[str] = None
 
 
 @dataclass
@@ -20,6 +21,7 @@ class LocalMod:
     filename: str
     filepath: str
     sha512: str
+    murmur2: Optional[int] = None
 
 
 @dataclass
@@ -30,6 +32,7 @@ class ModVersion:
     download_url: str
     game_versions: list
     loaders: list
+    source: str = "modrinth"
 
 
 @dataclass
