@@ -1,3 +1,6 @@
 /.idea/
 /config.toml
 /.claude/
+/rst/target/debug/
+/rst/config.toml
+/rst/state.json

@@ -1,0 +1,27 @@
+# Copy to config.toml next to the executable.
+
+[local]
+mods_folder = "C:/Users/you/AppData/Roaming/.minecraft/mods"
+minecraft_version = "1.20.1"
+loader = "forge"   # forge | fabric | quilt | neoforge
+
+# Optional: enables CurseForge lookups (checked before Modrinth)
+[curseforge]
+api_key = "YOUR_CF_API_KEY"
+
+# One block per server — add as many [[servers]] as you want.
+[[servers]]
+name = "Main server"
+host = "example.com"
+port = 22
+username = "user"
+password = "pass"
+remote_mods_folder = "/home/mc/mods"
+
+#[[servers]]
+#name = "Second server"
+#host = "other.example.com"
+#port = 22
+#username = "user"
+#password = "pass"
+#remote_mods_folder = "/mods"

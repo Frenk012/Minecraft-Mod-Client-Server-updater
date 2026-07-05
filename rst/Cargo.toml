@@ -1,0 +1,23 @@
+[package]
+name = "mc-mod-updater"
+version = "0.2.0"
+edition = "2024"
+
+[[bin]]
+name = "mc-mod-updater"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+anyhow = "1"
+futures-util = "0.3"
+bytes = "1"
+russh = { version = "0.61", default-features = false, features = ["ring", "rsa", "flate2"] }
+russh-sftp = "2"
+eframe = "0.31"
