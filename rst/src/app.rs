@@ -18,6 +18,7 @@ pub enum Msg {
 enum Tab {
     Client,
     Server(usize),
+    SyncServers,
     Settings,
 }
 
@@ -55,13 +56,17 @@ pub struct App {
     client_result: Option<IdentifyResult>,
     client_sel: Vec<bool>,
     servers: Vec<ServerPanel>,
+    s2s_src: usize,
+    s2s_dst: usize,
+    s2s_disc: Vec<DiscrepancyRecord>,
+    s2s_sel: Vec<bool>,
     draft: AppConfig,
     cf_key_draft: String,
 }
 
 impl App {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let cfg = config::load_config("config.toml").map_err(|e| format!("{e:#}"));
+        let cfg = config::load_config(&config::config_path()).map_err(|e| format!("{e:#}"));
         let n_servers = cfg.as_ref().map(|c| c.servers.len()).unwrap_or(0);
         let (tx, rx) = channel();
         let draft = cfg.as_ref().cloned().unwrap_or_else(|_| default_config());
@@ -84,6 +89,10 @@ impl App {
             client_result: None,
             client_sel: Vec::new(),
             servers: (0..n_servers).map(|_| ServerPanel::default()).collect(),
+            s2s_src: 0,
+            s2s_dst: 1,
+            s2s_disc: Vec::new(),
+            s2s_sel: Vec::new(),
             draft,
             cf_key_draft,
         }
@@ -178,7 +187,14 @@ impl App {
                 )
                 .await?;
                 let discrepancies = match &client_known {
-                    Some(known) => sync::compare_mod_sets(known, &result.known),
+                    Some(known) => {
+                        let unk: std::collections::HashSet<String> = result
+                            .unknown
+                            .iter()
+                            .map(|u| u.local_mod.sha512.clone())
+                            .collect();
+                        sync::compare_mod_sets(known, &result.known, &unk, true)
+                    }
                     None => Vec::new(),
                 };
                 anyhow::Ok((result, discrepancies))
@@ -233,6 +249,44 @@ impl App {
         });
     }
 
+    fn apply_s2s(&mut self, ctx: &egui::Context, src_idx: usize, dst_idx: usize, selected: Vec<DiscrepancyRecord>) {
+        let src = self.cfg().servers[src_idx].clone();
+        let dst = self.cfg().servers[dst_idx].clone();
+        let tx = self.tx.clone();
+        let progress = self.progress.clone();
+        let ctx = ctx.clone();
+        self.busy = true;
+        self.push_log(format!(
+            "Syncing {} item(s): '{}' → '{}'…",
+            selected.len(),
+            server_label(&src.name, src_idx),
+            server_label(&dst.name, dst_idx)
+        ));
+
+        self.rt.spawn(async move {
+            let res = async {
+                progress.set(format!("Connecting to {}…", src.host));
+                let src_sftp = sftp::SftpClient::connect(&src).await?;
+                progress.set(format!("Connecting to {}…", dst.host));
+                let dst_sftp = sftp::SftpClient::connect(&dst).await?;
+                sync::sync_between_servers(
+                    &src_sftp,
+                    &dst_sftp,
+                    &selected,
+                    &src.remote_mods_folder,
+                    &dst.remote_mods_folder,
+                    &progress,
+                )
+                .await
+            }
+            .await
+            .map(|_| "Server → server sync complete. Rescan destination to verify.".to_string())
+            .map_err(|e| format!("{e:#}"));
+            let _ = tx.send(Msg::Done(res));
+            ctx.request_repaint();
+        });
+    }
+
     // ── Message pump ──────────────────────────────────────────────────────
 
     fn pump(&mut self) {
@@ -264,6 +318,9 @@ impl App {
                     let p = &mut self.servers[idx];
                     p.result = Some(res);
                     p.discrepancies = disc;
+                    // Server data changed: any server↔server comparison is stale
+                    self.s2s_disc.clear();
+                    self.s2s_sel.clear();
                 }
                 Msg::Server(_, Err(e)) => self.push_log(format!("ERROR: {e}")),
                 Msg::Done(Ok(s)) => self.push_log(s),
@@ -425,28 +482,17 @@ impl App {
         } else {
             let disc = self.servers[idx].discrepancies.clone();
             ui.heading(format!("Discrepancies vs client: {}", disc.len()));
-            egui::ScrollArea::vertical().id_salt("srv_disc").max_height(250.0).show(ui, |ui| {
-                egui::Grid::new(("disc_grid", idx)).striped(true).min_col_width(60.0).show(ui, |ui| {
-                    ui.strong(""); ui.strong("Mod"); ui.strong("Kind"); ui.strong("Action");
-                    ui.end_row();
-                    for (i, d) in disc.iter().enumerate() {
-                        let bl = self.state.is_blacklisted(&d.project_id);
-                        if bl {
-                            self.servers[idx].disc_sel[i] = false;
-                        }
-                        ui.add_enabled(!bl, egui::Checkbox::without_text(&mut self.servers[idx].disc_sel[i]));
-                        ui.label(&d.project_name);
-                        let (kind, action) = match d.kind {
-                            DiscrepancyKind::Mismatch => ("version mismatch", "upload client version"),
-                            DiscrepancyKind::ClientOnly => ("missing on server", "upload to server"),
-                            DiscrepancyKind::ServerOnly => ("extra on server", "delete from server"),
-                        };
-                        ui.label(kind);
-                        ui.label(if bl { "blacklisted — skipped" } else { action });
-                        ui.end_row();
-                    }
-                });
-            });
+            ui.label("Client-only mods are never pushed to the server; server-only mods are never flagged for deletion.");
+            let toggle_bl_disc = discrepancy_groups_ui(
+                ui,
+                &format!("srv_disc{idx}"),
+                &disc,
+                &mut self.servers[idx].disc_sel,
+                &self.state,
+            );
+            if let Some((pid, name)) = toggle_bl_disc {
+                self.state.toggle_blacklist(&pid, &name);
+            }
 
             let sel_disc: Vec<DiscrepancyRecord> = disc
                 .iter()
@@ -462,6 +508,113 @@ impl App {
             {
                 self.apply_discrepancies(ctx, idx, sel_disc);
             }
+        }
+    }
+
+    fn sync_servers_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let n = self.cfg().servers.len();
+        if n < 2 {
+            ui.label("Configure at least two servers to sync between them.");
+            return;
+        }
+        if self.s2s_src >= n {
+            self.s2s_src = 0;
+        }
+        if self.s2s_dst >= n {
+            self.s2s_dst = n - 1;
+        }
+
+        let names: Vec<String> = self.cfg().servers.iter().enumerate()
+            .map(|(i, s)| server_label(&s.name, i))
+            .collect();
+
+        ui.heading("Sync between servers");
+        ui.label("Jars are transferred source → destination via SFTP. Client-only mods are always skipped.");
+        ui.add_space(6.0);
+
+        ui.horizontal(|ui| {
+            ui.label("Source");
+            egui::ComboBox::from_id_salt("s2s_src")
+                .selected_text(&names[self.s2s_src])
+                .show_ui(ui, |ui| {
+                    for (i, name) in names.iter().enumerate() {
+                        if ui.selectable_value(&mut self.s2s_src, i, name).changed() {
+                            self.s2s_disc.clear();
+                        }
+                    }
+                });
+            ui.label("→ Destination");
+            egui::ComboBox::from_id_salt("s2s_dst")
+                .selected_text(&names[self.s2s_dst])
+                .show_ui(ui, |ui| {
+                    for (i, name) in names.iter().enumerate() {
+                        if ui.selectable_value(&mut self.s2s_dst, i, name).changed() {
+                            self.s2s_disc.clear();
+                        }
+                    }
+                });
+        });
+        if self.s2s_src == self.s2s_dst {
+            ui.colored_label(egui::Color32::LIGHT_RED, "Source and destination must differ.");
+            return;
+        }
+
+        // Both sides need a scan (reuses per-server tab scans)
+        ui.horizontal(|ui| {
+            for (role, i) in [("source", self.s2s_src), ("destination", self.s2s_dst)] {
+                if self.servers[i].result.is_none()
+                    && ui.add_enabled(!self.busy, egui::Button::new(format!("🔍 Scan {role} '{}'", names[i]))).clicked()
+                {
+                    self.scan_server(ctx, i);
+                }
+            }
+        });
+
+        let (s, d) = (self.s2s_src, self.s2s_dst);
+        let both_scanned = self.servers[s].result.is_some() && self.servers[d].result.is_some();
+        if !both_scanned {
+            ui.label("Scan both servers to compare.");
+            return;
+        }
+
+        if ui.add_enabled(!self.busy, egui::Button::new("🔃 Compare servers")).clicked() {
+            let src = self.servers[s].result.as_ref().unwrap();
+            let dst = self.servers[d].result.as_ref().unwrap();
+            let unk: std::collections::HashSet<String> =
+                dst.unknown.iter().map(|u| u.local_mod.sha512.clone()).collect();
+            self.s2s_disc = sync::compare_mod_sets(&src.known, &dst.known, &unk, false);
+            self.s2s_sel = vec![true; self.s2s_disc.len()];
+            self.push_log(format!(
+                "Compared '{}' → '{}': {} discrepanc(ies).",
+                names[s], names[d], self.s2s_disc.len()
+            ));
+        }
+
+        if self.s2s_disc.is_empty() {
+            ui.label("No comparison yet, or servers already in sync.");
+            return;
+        }
+
+        ui.separator();
+        let disc = self.s2s_disc.clone();
+        ui.heading(format!("Discrepancies '{}' → '{}': {}", names[s], names[d], disc.len()));
+        let toggle = discrepancy_groups_ui(ui, "s2s_disc", &disc, &mut self.s2s_sel, &self.state);
+        if let Some((pid, name)) = toggle {
+            self.state.toggle_blacklist(&pid, &name);
+        }
+
+        let selected: Vec<DiscrepancyRecord> = disc
+            .iter()
+            .enumerate()
+            .filter(|(i, r)| self.s2s_sel[*i] && !self.state.is_blacklisted(&r.project_id))
+            .map(|(_, r)| r.clone())
+            .collect();
+        if ui
+            .add_enabled(!self.busy && !selected.is_empty(),
+                egui::Button::new(format!("🔄 Sync {} item(s) to '{}'", selected.len(), names[d])))
+            .clicked()
+        {
+            self.apply_s2s(ctx, s, d, selected);
         }
     }
 
@@ -547,13 +700,15 @@ impl App {
                 } else {
                     Some(CurseForgeConfig { api_key: self.cf_key_draft.trim().to_string() })
                 };
-                match config::save_config("config.toml", &self.draft) {
+                match config::save_config(&config::config_path(), &self.draft) {
                     Ok(()) => {
                         self.cfg = Ok(self.draft.clone());
                         // Server list may have changed: reset panels, keep client scan.
                         self.servers = (0..self.draft.servers.len())
                             .map(|_| ServerPanel::default())
                             .collect();
+                        self.s2s_disc.clear();
+                        self.s2s_sel.clear();
                         self.push_log("Settings saved to config.toml.");
                     }
                     Err(e) => self.push_log(format!("ERROR saving config: {e:#}")),
@@ -588,6 +743,71 @@ impl App {
     }
 }
 
+/// Grouped discrepancy list (mismatch / missing / extra) with per-group
+/// select-all and per-row blacklist toggle. Returns the (id, name) of a
+/// mod whose blacklist button was clicked, if any.
+fn discrepancy_groups_ui(
+    ui: &mut egui::Ui,
+    salt: &str,
+    disc: &[DiscrepancyRecord],
+    sel: &mut [bool],
+    state: &AppState,
+) -> Option<(String, String)> {
+    let mut toggle_bl: Option<(String, String)> = None;
+    egui::ScrollArea::vertical().id_salt(salt).max_height(300.0).show(ui, |ui| {
+        let groups = [
+            (DiscrepancyKind::Mismatch, "⚠ Version mismatch", "push source version"),
+            (DiscrepancyKind::ClientOnly, "⬆ Missing on destination", "upload"),
+            (DiscrepancyKind::ServerOnly, "🗑 Extra on destination", "delete"),
+        ];
+        for (g, (kind, title, action)) in groups.into_iter().enumerate() {
+            let idxs: Vec<usize> = disc.iter().enumerate()
+                .filter(|(_, d)| d.kind == kind)
+                .map(|(i, _)| i)
+                .collect();
+            if idxs.is_empty() {
+                continue;
+            }
+            let selectable: Vec<usize> = idxs.iter().copied()
+                .filter(|&i| !state.is_blacklisted(&disc[i].project_id))
+                .collect();
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                let mut all = !selectable.is_empty()
+                    && selectable.iter().all(|&i| sel[i]);
+                if ui.add_enabled(!selectable.is_empty(), egui::Checkbox::without_text(&mut all)).changed() {
+                    for &i in &selectable {
+                        sel[i] = all;
+                    }
+                }
+                ui.strong(format!("{title} ({}) — {action}", idxs.len()));
+            });
+            egui::Grid::new((salt, "grid", g)).striped(true).min_col_width(60.0).show(ui, |ui| {
+                ui.strong(""); ui.strong("Mod"); ui.strong("Side"); ui.strong("Status"); ui.strong("Blacklist");
+                ui.end_row();
+                for &i in &idxs {
+                    let d = &disc[i];
+                    let bl = state.is_blacklisted(&d.project_id);
+                    if bl {
+                        sel[i] = false;
+                    }
+                    ui.add_enabled(!bl, egui::Checkbox::without_text(&mut sel[i]));
+                    ui.label(&d.project_name);
+                    let side = d.client_mod.as_ref().or(d.server_mod.as_ref())
+                        .map(|m| m.side.label()).unwrap_or("-");
+                    ui.label(side);
+                    ui.label(if bl { "blacklisted — skipped" } else { action });
+                    if ui.button(if bl { "✔ blacklisted" } else { "🚫" }).clicked() {
+                        toggle_bl = Some((d.project_id.clone(), d.project_name.clone()));
+                    }
+                    ui.end_row();
+                }
+            });
+        }
+    });
+    toggle_bl
+}
+
 fn server_label(name: &str, idx: usize) -> String {
     if name.is_empty() {
         format!("Server {}", idx + 1)
@@ -615,6 +835,9 @@ impl eframe::App for App {
                         .collect();
                     for (i, n) in names.iter().enumerate() {
                         ui.selectable_value(&mut self.tab, Tab::Server(i), format!("🌐 {n}"));
+                    }
+                    if names.len() >= 2 {
+                        ui.selectable_value(&mut self.tab, Tab::SyncServers, "🔁 Sync servers");
                     }
                 }
                 ui.selectable_value(&mut self.tab, Tab::Settings, "⚙ Settings");
@@ -650,6 +873,7 @@ impl eframe::App for App {
                     Tab::Client => self.client_tab(ui, ctx),
                     Tab::Server(idx) if idx < self.servers.len() => self.server_tab(ui, ctx, idx),
                     Tab::Server(_) => {}
+                    Tab::SyncServers => self.sync_servers_tab(ui, ctx),
                     Tab::Settings => {
                         if let Err(e) = self.cfg.clone() {
                             ui.colored_label(egui::Color32::LIGHT_RED, format!("Config error: {e}"));

@@ -23,8 +23,10 @@ class SFTPClient:
             connect_kwargs["key_filename"] = config.sftp_key_path
         else:
             connect_kwargs["password"] = config.sftp_password
+            connect_kwargs["allow_agent"] = False
+            connect_kwargs["look_for_keys"] = False
 
-        self._ssh.connect(**connect_kwargs)
+        self._ssh.connect(timeout=15, banner_timeout=15, auth_timeout=15, **connect_kwargs)
         self._sftp = self._ssh.open_sftp()
         return self
 

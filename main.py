@@ -1,7 +1,6 @@
 import sys
 import socket
 import paramiko
-import questionary
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -73,7 +72,7 @@ def main() -> None:
     console.print()
     console.rule("[bold]Phase 2 — Server Sync[/bold]")
 
-    if not questionary.confirm("Connect to SFTP server to sync mods?", default=True).ask():
+    if not ui.confirm("Connect to SFTP server to sync mods?", default=True):
         console.print("[dim]Skipping server sync.[/dim]")
         return
 
@@ -126,7 +125,7 @@ def main() -> None:
                     f"\n[red]{len(server_only)}[/red] mod(s) exist only on the server. "
                     "Include them for deletion?"
                 )
-                if questionary.confirm("Delete server-only mods?", default=False).ask():
+                if ui.confirm("Delete server-only mods?", default=False):
                     actionable.extend(server_only)
 
             selected_disc = ui.prompt_select_discrepancies(actionable)
@@ -149,6 +148,12 @@ def main() -> None:
         sys.exit(1)
     except socket.gaierror as e:
         console.print(f"[red]SFTP Error:[/red] Cannot reach host '{config.sftp_host}': {e}")
+        sys.exit(1)
+    except (socket.timeout, OSError) as e:
+        console.print(f"[red]SFTP Error:[/red] Connection failed: {e}")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]SFTP Error:[/red] Unexpected error: {e}")
         sys.exit(1)
 
 

@@ -2,7 +2,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-const STATE_FILE: &str = "state.json";
+fn state_file() -> std::path::PathBuf {
+    crate::config::app_dir().join("state.json")
+}
 
 /// Persistent app state: survives crashes/restarts.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -14,14 +16,14 @@ pub struct AppState {
 
 impl AppState {
     pub fn load() -> Self {
-        std::fs::read_to_string(STATE_FILE)
+        std::fs::read_to_string(state_file())
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
     }
 
     pub fn save(&self) -> Result<()> {
-        std::fs::write(STATE_FILE, serde_json::to_string_pretty(self)?)?;
+        std::fs::write(state_file(), serde_json::to_string_pretty(self)?)?;
         Ok(())
     }
 

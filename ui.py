@@ -1,4 +1,5 @@
 import questionary
+from prompt_toolkit.output.win32 import NoConsoleScreenBufferError
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, DownloadColumn, TimeRemainingColumn
@@ -45,6 +46,14 @@ def show_update_table(mod_infos: list, unknown_mods: list) -> None:
     console.print(table)
 
 
+def confirm(message: str, default: bool = True) -> bool:
+    try:
+        return bool(questionary.confirm(message, default=default).ask())
+    except NoConsoleScreenBufferError:
+        console.print(f"[yellow]No interactive console — assuming '{default}' for: {message}[/yellow]")
+        return default
+
+
 def prompt_select_updates(updatable: list) -> list:
     if not updatable:
         return []
@@ -58,10 +67,14 @@ def prompt_select_updates(updatable: list) -> list:
         for m in updatable
     ]
 
-    selected = questionary.checkbox(
-        "Select mods to update (space to toggle, enter to confirm):",
-        choices=choices,
-    ).ask()
+    try:
+        selected = questionary.checkbox(
+            "Select mods to update (space to toggle, enter to confirm):",
+            choices=choices,
+        ).ask()
+    except NoConsoleScreenBufferError:
+        console.print("[yellow]No interactive console detected — run from a real terminal (not IDE redirected output). Selecting all updates.[/yellow]")
+        return updatable
 
     return selected or []
 
@@ -108,10 +121,14 @@ def prompt_select_discrepancies(discrepancies: list) -> list:
         for d in discrepancies
     ]
 
-    selected = questionary.checkbox(
-        "Select discrepancies to resolve (pushes client version to server):",
-        choices=choices,
-    ).ask()
+    try:
+        selected = questionary.checkbox(
+            "Select discrepancies to resolve (pushes client version to server):",
+            choices=choices,
+        ).ask()
+    except NoConsoleScreenBufferError:
+        console.print("[yellow]No interactive console detected — run from a real terminal. Selecting all.[/yellow]")
+        return discrepancies
 
     return selected or []
 
